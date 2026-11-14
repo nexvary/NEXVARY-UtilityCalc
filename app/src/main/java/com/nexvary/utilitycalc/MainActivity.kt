@@ -144,7 +144,7 @@ class MainActivity: ComponentActivity() {
                         IconButton(onClick={page="الرئيسية"}) { Icon(Icons.Default.ArrowForward,null,tint=White) }
                         Text(page,fontSize=26.sp,fontWeight=FontWeight.Bold,color=White)
                         Spacer(Modifier.height(12.dp))
-                        Text("هذا القسم قيد التطوير. لن تُعرض بيانات وهمية.",color=Cyan)
+                        UtilityCalculator(page)
                         if(page=="الإعدادات") Button(onClick={page="الكهرباء"}) { Text("إعداد تعريفة الكهرباء") }
                     }
                 }
@@ -170,5 +170,70 @@ class MainActivity: ComponentActivity() {
     Column {
         Text(label,color=White,fontSize=13.sp)
         OutlinedTextField(value=value,onValueChange=onValue,placeholder={Text(hint,color=Color.Gray,fontSize=12.sp)},singleLine=true,modifier=Modifier.fillMaxWidth(),keyboardOptions=KeyboardOptions(keyboardType=if(numeric) KeyboardType.Decimal else KeyboardType.Text),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=Cyan,unfocusedBorderColor=Color(0xFF6A8497),focusedTextColor=White,unfocusedTextColor=White))
+    }
+}
+
+@Composable private fun UtilityCalculator(section:String) {
+    val context=LocalContext.current
+    val prefs=remember { context.getSharedPreferences("utility_prices",0) }
+    var quantity by rememberSaveable(section) { mutableStateOf("") }
+    var unitPrice by rememberSaveable(section) { mutableStateOf(prefs.getString(section,"") ?: "") }
+    var watts by rememberSaveable(section) { mutableStateOf("") }
+    var hours by rememberSaveable(section) { mutableStateOf("") }
+    var days by rememberSaveable(section) { mutableStateOf("") }
+    var batteryVolts by rememberSaveable(section) { mutableStateOf("12") }
+    var batteryAh by rememberSaveable(section) { mutableStateOf("70") }
+    var efficiency by rememberSaveable(section) { mutableStateOf("85") }
+    var message by remember { mutableStateOf("") }
+    val unit=when(section) {
+        "الغاز" -> "متر مكعب أو كيلوجرام"
+        "المياه" -> "متر مكعب"
+        "الوقود" -> "لتر"
+        else -> "وحدة"
+    }
+    NeonPanel("حاسبة $section") {
+        when(section) {
+            "الغاز","المياه","الوقود" -> {
+                Field("الكمية المستهلكة ($unit)",quantity,{quantity=it},"أدخل الكمية",true)
+                Field("سعر الوحدة بالجنيه",unitPrice,{unitPrice=it},"لا يوجد سعر افتراضي",true)
+                val q=quantity.toDoubleOrNull()
+                val p=unitPrice.toDoubleOrNull()
+                val valid=q!=null && p!=null && q>=0 && p>=0 && q.isFinite() && p.isFinite()
+                Button(onClick={prefs.edit().putString(section,unitPrice).apply();message="تم حفظ السعر على الجهاز"},enabled=p!=null && p>=0 && p.isFinite()) { Text("حفظ السعر") }
+                if(message.isNotEmpty()) Text(message,color=Green)
+                Text(if(valid) "التكلفة: "+String.format(Locale.US,"%.2f جنيه",q!!*p!!) else "أدخل الكمية والسعر لحساب التكلفة",color=Gold,fontSize=20.sp)
+                Text("الحساب لا يضيف رسومًا أو شرائح لم تُدخلها.",color=Cyan,fontSize=12.sp)
+            }
+            "الطاقة الشمسية" -> {
+                Text("حاسبة البطارية والإنفرتر",color=Green,fontSize=18.sp)
+                Field("جهد البطارية (V)",batteryVolts,{batteryVolts=it},"12",true)
+                Field("سعة البطارية (Ah)",batteryAh,{batteryAh=it},"70",true)
+                Field("قدرة الجهاز (W)",watts,{watts=it},"1000",true)
+                Field("كفاءة الإنفرتر (%)",efficiency,{efficiency=it},"85",true)
+                val v=batteryVolts.toDoubleOrNull()
+                val a=batteryAh.toDoubleOrNull()
+                val w=watts.toDoubleOrNull()
+                val e=efficiency.toDoubleOrNull()
+                if(v!=null && a!=null && w!=null && e!=null && v>0 && a>0 && w>0 && e>0 && e<=100 && listOf(v,a,w,e).all{it.isFinite()}) {
+                    val minutes=v*a*(e/100.0)/w*60.0
+                    Text("الحد النظري بعد فاقد الإنفرتر: "+String.format(Locale.US,"%.1f دقيقة",minutes),color=Gold,fontSize=18.sp)
+                    Text("هذه ليست مدة تشغيل مضمونة؛ بطاريات الرصاص تفقد سعتها عند التيارات العالية وقد يفصل الإنفرتر مبكرًا. يلزم نوع البطارية ومنحنى التفريغ لحساب أدق.",color=Cyan,fontSize=12.sp)
+                } else Text("أدخل بيانات البطارية والجهاز",color=White)
+            }
+            "المحاكاة الذكية" -> {
+                Text("مقارنة تكلفة جهاز يعمل بالكهرباء",color=White)
+                Field("قدرة الجهاز (W)",watts,{watts=it},"1000",true)
+                Field("ساعات التشغيل يوميًا",hours,{hours=it},"4",true)
+                Field("عدد الأيام",days,{days=it},"30",true)
+                Field("سعر الكيلووات ساعة بالجنيه",unitPrice,{unitPrice=it},"أدخل السعر",true)
+                val values=listOf(watts,hours,days,unitPrice).map{it.toDoubleOrNull()}
+                if(values.all{it!=null && it>=0 && it.isFinite()}) {
+                    val energy=values[0]!!*values[1]!!*values[2]!!/1000.0
+                    Text("الطاقة: "+String.format(Locale.US,"%.2f kWh",energy),color=White)
+                    Text("التكلفة: "+String.format(Locale.US,"%.2f جنيه",energy*values[3]!!),color=Gold,fontSize=20.sp)
+                } else Text("أدخل القيم للمقارنة",color=Cyan)
+            }
+            else -> Text("لا توجد بيانات مسجلة بعد",color=Cyan)
+        }
     }
 }
